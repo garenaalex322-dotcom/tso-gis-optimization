@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import pulp
 import pydeck as pdk
-import requests
+import json
 from shapely.geometry import shape, Point
 import warnings
 
@@ -12,36 +12,17 @@ warnings.filterwarnings('ignore')
 # --- НАСТРОЙКА СТРАНИЦЫ ---
 st.set_page_config(page_title="ГИС Оптимизация ТСО", layout="wide", page_icon="🌍")
 
-
-# --- 1. ЗАГРУЗКА ГРАНИЦ ТАТАРСТАНА (OpenStreetMap) ---
+# --- 1. ЗАГРУЗКА ГРАНИЦ ТАТАРСТАНА (ЛОКАЛЬНЫЙ GEOJSON) ---
 @st.cache_data
 def get_tatarstan_geojson():
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {
-        "state": "Татарстан",
-        "country": "Россия",
-        "polygon_geojson": 1,
-        "format": "json"
-    }
-    headers = {'User-Agent': 'TSO-Optimization-App'}
     try:
-        r = requests.get(url, params=params, headers=headers)
-        data = r.json()
-        if data:
-            return {
-                "type": "FeatureCollection",
-                "features": [
-                    {
-                        "type": "Feature",
-                        "geometry": data[0]["geojson"],
-                        "properties": {"name": "Республика Татарстан"}
-                    }
-                ]
-            }
+        # Читаем локальный файл вместо скачивания из интернета
+        with open('tatarstan_districts_osm.geojson', 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data
     except Exception as e:
-        st.warning(f"Не удалось загрузить границы региона: {e}")
+        st.warning(f"Не удалось загрузить файл tatarstan_districts_osm.geojson. Убедитесь, что он лежит в папке с app.py. Ошибка: {e}")
         return None
-
 
 # --- 2. КЭШИРОВАНИЕ И ОЧИСТКА ДАННЫХ ---
 @st.cache_data
@@ -165,7 +146,6 @@ def run_model(df_zones, old_coords, w_fire, w_flood, alpha, small_budget, q_min)
         fire_idx = row.get('Индекс_Огня', 0.0)
         water_idx = row.get('Индекс_Воды', 0.0)
 
-        # Считаем базовый риск по ДВУМ ползункам!
         R_base = (w_fire * fire_idx) + (w_flood * water_idx)
         init_risk += R_base
 
@@ -206,7 +186,6 @@ def run_model(df_zones, old_coords, w_fire, w_flood, alpha, small_budget, q_min)
         fire_idx = row.get('Индекс_Огня', 0.0)
         water_idx = row.get('Индекс_Воды', 0.0)
 
-        # ЧЕСТНАЯ КЛАССИФИКАЦИЯ УГРОЗ
         if fire_idx >= 0.5 and water_idx >= 0.5:
             th = "МУЛЬТИРИСК"
         elif water_idx > fire_idx:
@@ -231,7 +210,6 @@ def run_model(df_zones, old_coords, w_fire, w_flood, alpha, small_budget, q_min)
                                row.get('До_ближайшей_4G_вышки_км', 10), pop_int)
                 O_final = int(min(equip["cov"], pop_int) * equip["k_act"])
 
-                # Цвета для карты (Фиолетовый, Синий, Красный)
                 if th == "МУЛЬТИРИСК":
                     c = [128, 0, 128, 200]
                 elif th == "ПАВОДОК":
@@ -268,7 +246,6 @@ df_z, old_c = load_data(boundary)
 if df_z is not None:
     st.sidebar.header("⚙️ Настройки Симплекс-метода")
 
-    # ВОТ ОНИ - ДВА ОТДЕЛЬНЫХ ПОЛЗУНКА!
     st.sidebar.markdown("### ⚖️ Баланс угроз")
     st.sidebar.markdown("Укажите, защиту от какой стихии считать приоритетной при распределении оборудования.")
     w_fire = st.sidebar.slider("🔥 Вес риска ПОЖАРОВ", 0.0, 1.0, 0.6, 0.05)
