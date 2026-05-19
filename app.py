@@ -4,7 +4,6 @@ import numpy as np
 import pulp
 import pydeck as pdk
 import json
-from shapely.geometry import shape, Point
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -12,21 +11,24 @@ warnings.filterwarnings('ignore')
 # --- НАСТРОЙКА СТРАНИЦЫ ---
 st.set_page_config(page_title="ГИС Оптимизация ТСО", layout="wide", page_icon="🌍")
 
-# --- 1. ЗАГРУЗКА ГРАНИЦ ТАТАРСТАНА (ЛОКАЛЬНЫЙ GEOJSON) ---
+
+# --- 1. ЗАГРУЗКА ГРАНИЦ ТАТАРСТАНА (ИЗ ВАШЕГО ЛОКАЛЬНОГО GEOJSON ФАЙЛА) ---
 @st.cache_data
 def get_tatarstan_geojson():
     try:
-        # Читаем локальный файл вместо скачивания из интернета
+        # Читаем именно ваш файл tatarstan_districts_osm.geojson
         with open('tatarstan_districts_osm.geojson', 'r', encoding='utf-8') as f:
             data = json.load(f)
         return data
     except Exception as e:
-        st.warning(f"Не удалось загрузить файл tatarstan_districts_osm.geojson. Убедитесь, что он лежит в папке с app.py. Ошибка: {e}")
+        st.warning(
+            f"Не удалось загрузить локальный файл границ: {e}. Убедитесь, что tatarstan_districts_osm.geojson лежит в папке с приложением.")
         return None
+
 
 # --- 2. КЭШИРОВАНИЕ И ОЧИСТКА ДАННЫХ ---
 @st.cache_data
-def load_data(geojson_boundary):
+def load_data():
     try:
         df_matrix = pd.read_excel('СУПЕР_МАТРИЦА_ЭТАЛОН_ОБЪЕДИНЕННАЯ.xlsx')
 
@@ -94,12 +96,12 @@ def load_data(geojson_boundary):
 
         return df_zones, old_coords
     except Exception as e:
-        st.error(f"Ошибка загрузки файлов: {e}")
+        st.error(f"Ошибка загрузки файлов Excel: {e}")
         return None, None
 
 
-# --- 3. ЯДРО ОПТИМИЗАЦИИ (СИМПЛЕКС-МЕТОД) ---
-def run_model(df_zones, old_coords, w_fire, w_flood, alpha, small_budget, q_min):
+# --- 3. ЯДРО ОПТИМИЗАЦИИ ---
+def run_model(df_zones, w_fire, w_flood, alpha, small_budget, q_min):
     BUDGET = 5000
 
     catalog = [
@@ -240,8 +242,8 @@ def run_model(df_zones, old_coords, w_fire, w_flood, alpha, small_budget, q_min)
 st.title("📡 Web-GIS: Интеллектуальная оптимизация систем оповещения")
 st.markdown("Модель Симплекс-метода для сельских территорий и лесостепных зон (Республика Татарстан).")
 
-boundary = get_tatarstan_geojson()
-df_z, old_c = load_data(boundary)
+boundary_data = get_tatarstan_geojson()
+df_z, old_c = load_data()
 
 if df_z is not None:
     st.sidebar.header("⚙️ Настройки Симплекс-метода")
@@ -258,7 +260,7 @@ if df_z is not None:
 
     if st.sidebar.button("🚀 ЗАПУСТИТЬ ОПТИМИЗАЦИЮ", type="primary"):
         with st.spinner("Решение задачи линейного программирования..."):
-            df_res, r_in, r_out = run_model(df_z, old_c, w_fire, w_flood, alpha, small_budget, q_min)
+            df_res, r_in, r_out = run_model(df_z, w_fire, w_flood, alpha, small_budget, q_min)
 
         if not df_res.empty:
             col1, col2, col3, col4 = st.columns(4)
@@ -271,21 +273,23 @@ if df_z is not None:
             center_lat, center_lon = df_res['Широта'].mean(), df_res['Долгота'].mean()
 
             layers = []
-            if boundary:
+
+            # ОТРИСОВКА ВАШИХ ГРАНИЦ ИЗ GEOJSON
+            if boundary_data:
                 boundary_layer = pdk.Layer(
                     "GeoJsonLayer",
-                    boundary,
-                    opacity=0.1,
+                    boundary_data,
+                    opacity=0.3,
                     stroked=True,
                     filled=True,
-                    extruded=False,
                     wireframe=True,
-                    get_fill_color="[100, 150, 200, 50]",
-                    get_line_color="[50, 50, 50, 200]",
-                    line_width_min_pixels=2
+                    get_fill_color=[100, 150, 200, 20],  # Полупрозрачная заливка районов
+                    get_line_color=[100, 100, 100, 150],  # Контуры районов серым цветом
+                    line_width_min_pixels=1
                 )
                 layers.append(boundary_layer)
 
+            # ОТРИСОВКА ТОЧЕК РИСКА И ТСО
             points_layer = pdk.Layer(
                 "ScatterplotLayer",
                 data=df_res,
