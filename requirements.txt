@@ -1,0 +1,8 @@
+streamlit
+pandas
+numpy
+pulp
+pydeck
+requests
+shapely
+openpyxl
