@@ -75,7 +75,6 @@ def load_data():
         except:
             pass
 
-        old_coords = set()
         try:
             df_old = pd.read_excel('Справочник_ТСО_ФИНАЛ.xlsx')
             old_lats = np.radians(df_old['latitude'].values)
@@ -99,10 +98,10 @@ def load_data():
             {'Индекс_Огня': 0.0, 'Индекс_Воды': 0.0, 'Мультириск_ФИНАЛ': 0.0, 'До_ближайшей_2G_вышки_км': 10.0,
              'До_ближайшей_4G_вышки_км': 10.0})
         df_zones = df_zones.dropna(subset=['Население'])
-        return df_zones, old_coords
+        return df_zones
     except Exception as e:
         st.error(f"Ошибка загрузки файлов: {e}")
-        return None, None
+        return None
 
 
 # --- 3. ЯДРО ОПТИМИЗАЦИИ ---
@@ -226,6 +225,7 @@ st.title("📡 Web-GIS: Интеллектуальная оптимизация"
 boundary_data = get_tatarstan_geojson()
 
 data_result = load_data()
+
 if data_result is not None:
     df_z = data_result
     w_fire = st.sidebar.slider("🔥 Вес риска ПОЖАРОВ", 0.0, 1.0, 0.6, 0.05)
@@ -237,10 +237,16 @@ if data_result is not None:
     if st.sidebar.button("🚀 ЗАПУСТИТЬ ОПТИМИЗАЦИЮ", type="primary"):
         df_res, r_in, r_out = run_model(df_z, w_fire, w_flood, alpha, small_budget, q_min)
 
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Всего кластеров", len(df_res))
+        col2.metric("Установлено систем",
+                    len(df_res[~df_res['ТСО'].isin(['ОБОРУДОВАНО СТАРОЙ СИРЕНОЙ', 'ОТБРАКОВАНО'])]))
+        col3.metric("Общий бюджет (у.е.)", f"{df_res['Стоимость'].sum():,}")
+        col4.metric("Снижение риска", f"{r_in:.2f} → {r_out:.2f}", f"-{((r_in - r_out) / r_in * 100):.1f}%")
+
         # СБОРКА СЛОЕВ КАРТЫ
         layers = []
 
-        # 1. Границы районов
         if boundary_data:
             boundary_layer = pdk.Layer(
                 "GeoJsonLayer",
@@ -254,43 +260,43 @@ if data_result is not None:
             )
             layers.append(boundary_layer)
 
-        # 2. Слой точек-кластеров (уменьшен радиус)
+        # Новые ТСО и Отбракованные точки
         points_layer = pdk.Layer(
             "ScatterplotLayer",
-            data=df_res,
+            data=df_res[df_res['ТСО'] != 'ОБОРУДОВАНО СТАРОЙ СИРЕНОЙ'],
             get_position=["Долгота", "Широта"],
             get_color="color",
-            get_radius=400,  # Сделали точки намного меньше!
+            get_radius=400,  # УМЕНЬШЕННЫЙ РАДИУС 400м
             pickable=True,
             filled=True,
         )
         layers.append(points_layer)
 
-        # 3. Визуализация существующих ТСО
+        # Выделение старых ТСО (Зеленое кольцо + мигалка)
         df_old = df_res[df_res['ТСО'] == 'ОБОРУДОВАНО СТАРОЙ СИРЕНОЙ'].copy()
         if not df_old.empty:
-            # Зеленое кольцо охвата 600 метров вокруг старых сирен
+            df_old['icon'] = '🚨'
+            # Кольцо радиусом 600м
             coverage_layer = pdk.Layer(
                 "ScatterplotLayer",
                 data=df_old,
                 get_position=["Долгота", "Широта"],
-                get_fill_color=[0, 0, 0, 0],  # Внутри прозрачное
-                get_line_color=[50, 200, 50, 255],  # Зеленая граница
-                get_radius=600,  # Радиус 600 метров
+                get_fill_color=[0, 0, 0, 0],
+                get_line_color=[50, 200, 50, 255],
+                get_radius=600,
                 stroked=True,
                 line_width_min_pixels=3,
-                pickable=False
+                pickable=True
             )
             layers.append(coverage_layer)
 
-            # Эмодзи-мигалка
-            df_old['icon'] = '🚨'
+            # Эмодзи
             text_layer = pdk.Layer(
                 "TextLayer",
                 data=df_old,
                 get_position=["Долгота", "Широта"],
                 get_text="icon",
-                get_size=20,
+                get_size=25,
                 get_alignment_baseline="'bottom'",
             )
             layers.append(text_layer)
@@ -302,3 +308,5 @@ if data_result is not None:
             tooltip={"html": "<b>{Н.П.}</b><br/>{Тип угрозы}<br/>{ТСО}<br/>Охват: {Охват} чел."}
         ))
         st.dataframe(df_res)
+else:
+    st.info("Пожалуйста, убедитесь, что все файлы Excel находятся в папке с приложением.")
