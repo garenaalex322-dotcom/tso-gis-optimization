@@ -8,3 +8,4 @@ shapely
 openpyxl
 matplotlib
 seaborn
+OpenAI
