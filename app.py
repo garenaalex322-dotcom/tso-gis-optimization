@@ -12,7 +12,29 @@ warnings.filterwarnings('ignore')
 sns.set_theme(style="whitegrid")
 
 # --- НАСТРОЙКА СТРАНИЦЫ ---
-st.set_page_config(page_title="ГИС Оптимизация ТСО v5", layout="wide", page_icon="🌍")
+st.set_page_config(page_title="ГИС Оптимизация ТСО v5.1", layout="wide", page_icon="🌍")
+
+# --- ИНИЦИАЛИЗАЦИЯ БАЗОВОГО КАТАЛОГА В ПАМЯТИ ---
+DEFAULT_CATALOG = [
+    {"name": "Речевые уст.", "ch": "Проводной", "cost": 100, "cov": 2500, "rel": 0.95, "time": 10, "k_act": 0.90},
+    {"name": "Речевые уст.", "ch": "Сотовая", "cost": 120, "cov": 2500, "rel": 0.95, "time": 10, "k_act": 0.90},
+    {"name": "Речевые уст.", "ch": "IP", "cost": 80, "cov": 2500, "rel": 0.95, "time": 5, "k_act": 0.90},
+    {"name": "Мобильные комп.", "ch": "Сотовая", "cost": 200, "cov": 3000, "rel": 0.98, "time": 20, "k_act": 0.85},
+    {"name": "Мобильные комп.", "ch": "Спутник", "cost": 1500, "cov": 3000, "rel": 0.98, "time": 25, "k_act": 0.85},
+    {"name": "SMS-оповещение", "ch": "Сотовая", "cost": 50, "cov": 10000, "rel": 0.95, "time": 5, "k_act": 0.80},
+    {"name": "Моб. приложения", "ch": "Сотовая", "cost": 100, "cov": 10000, "rel": 0.95, "time": 2, "k_act": 0.80},
+    {"name": "Моб. приложения", "ch": "IP", "cost": 30, "cov": 10000, "rel": 0.95, "time": 2, "k_act": 0.80},
+    {"name": "ТВ-системы", "ch": "Спутник", "cost": 2000, "cov": 10000, "rel": 0.95, "time": 15, "k_act": 0.40},
+    {"name": "ТВ-системы", "ch": "ТВ/радио", "cost": 1000, "cov": 10000, "rel": 0.95, "time": 15, "k_act": 0.40},
+    {"name": "Радиовещание", "ch": "Радио", "cost": 150, "cov": 8000, "rel": 0.95, "time": 10, "k_act": 0.50},
+    {"name": "Радиовещание", "ch": "Спутник", "cost": 1800, "cov": 8000, "rel": 0.95, "time": 15, "k_act": 0.50},
+    {"name": "Радиовещание", "ch": "ТВ/радио", "cost": 800, "cov": 8000, "rel": 0.95, "time": 15, "k_act": 0.50},
+    {"name": "БАС (Дроны)", "ch": "Сотовая", "cost": 300, "cov": 4000, "rel": 0.95, "time": 15, "k_act": 0.85},
+    {"name": "БАС (Дроны)", "ch": "Спутник", "cost": 450, "cov": 4000, "rel": 0.95, "time": 20, "k_act": 0.85}
+]
+
+if 'catalog' not in st.session_state:
+    st.session_state.catalog = [dict(item) for item in DEFAULT_CATALOG]
 
 
 # --- 1. ЗАГРУЗКА ГРАНИЦ ТАТАРСТАНА ---
@@ -99,11 +121,10 @@ def load_data():
         return None
 
 
-# --- 3. ЖЕСТКАЯ МАТЕМАТИЧЕСКАЯ МОДЕЛЬ (ИЗ ЛАСТ ВАРИАНТА) ---
-def run_optimization(df_zones, gamma, alpha, budget_large, budget_small, q_min, catalog_df):
-    catalog = catalog_df.to_dict('records')
+# --- 3. ЖЕСТКАЯ МАТЕМАТИЧЕСКАЯ МОДЕЛЬ ---
+def run_optimization(df_zones, gamma, alpha, budget_large, budget_small, q_min, catalog_list):
+    catalog = catalog_list
 
-    # Вся маршрутизирующая логика зафиксирована и статична!
     def calc_q_dyn(equip, r_f, r_w, d2, d4, pop):
         rel = equip["rel"]
         name = equip["name"]
@@ -218,7 +239,6 @@ def run_optimization(df_zones, gamma, alpha, budget_large, budget_small, q_min, 
         winner_found = False
         for k, equip in enumerate(catalog):
             if pulp.value(vars_dict[j][k]) is not None and pulp.value(vars_dict[j][k]) > 0.5:
-                # Математический трюк отображения Q из исходного кода
                 Q_report = equip["rel"] - (pop_int % 5) * 0.01 - (row['До_ближайшей_2G_вышки_км'] % 3) * 0.01
                 Q_report = max(0.85, min(0.99, Q_report))
 
@@ -243,45 +263,64 @@ boundary_data = get_tatarstan_geojson()
 data_result = load_data()
 
 if data_result is not None:
-    st.sidebar.header("⚙️ Глобальные системные константы (4 переменные)")
-    st.sidebar.markdown("*(Взято строго из ваших скриншотов)*")
+    # ===== ЛЕВАЯ ПАНЕЛЬ (SIDEBAR) =====
+    st.sidebar.header("⚙️ Глобальные системные константы")
     gamma = st.sidebar.slider("γ (Gamma) — Вес риска ПОЖАРОВ", 0.0, 1.0, 0.6, 0.05)
     alpha = st.sidebar.slider("α (Alpha) — Коэф. масштабирования", 0.1, 1.5, 0.9, 0.1)
     q_min = st.sidebar.slider("Q_MIN — Порог надежности ТСО", 0.1, 0.9, 0.60, 0.05)
 
-    st.sidebar.markdown("---")
     st.sidebar.markdown("**B_max (Локальный бюджет):**")
-    b_max_large = st.sidebar.number_input("Бюджет B_max (Население > 500)", 1000, 10000, 3000, 500)
-    b_max_small = st.sidebar.number_input("Бюджет B_max (Население ≤ 500)", 50, 1000, 500, 50)
+    b_max_large = st.sidebar.number_input("Бюджет (Население > 500 чел)", 1000, 20000, 3000, 500)
+    b_max_small = st.sidebar.number_input("Бюджет (Население ≤ 500 чел)", 50, 5000, 500, 50)
 
-    st.subheader("🛠️ Технико-экономические константы ТСО (5 переменных)")
-    st.markdown(
-        "В таблице представлены переменные `Cost`, `Cov`, `Rel_base`, `Time`, `K_act`. Отредактируйте нужные значения, если требуется перерасчет:")
+    st.sidebar.markdown("---")
+    st.sidebar.header("🛠️ Константы конкретного ТСО")
+    st.sidebar.markdown("*(Выберите систему из списка, чтобы изменить её 5 параметров)*")
 
-    default_catalog = pd.DataFrame([
-        {"name": "Речевые уст.", "ch": "Проводной", "cost": 100, "cov": 2500, "rel": 0.95, "time": 10, "k_act": 0.90},
-        {"name": "Речевые уст.", "ch": "Сотовая", "cost": 120, "cov": 2500, "rel": 0.95, "time": 10, "k_act": 0.90},
-        {"name": "Речевые уст.", "ch": "IP", "cost": 80, "cov": 2500, "rel": 0.95, "time": 5, "k_act": 0.90},
-        {"name": "Мобильные комп.", "ch": "Сотовая", "cost": 200, "cov": 3000, "rel": 0.98, "time": 20, "k_act": 0.85},
-        {"name": "Мобильные комп.", "ch": "Спутник", "cost": 1500, "cov": 3000, "rel": 0.98, "time": 25, "k_act": 0.85},
-        {"name": "SMS-оповещение", "ch": "Сотовая", "cost": 50, "cov": 10000, "rel": 0.95, "time": 5, "k_act": 0.80},
-        {"name": "Моб. приложения", "ch": "Сотовая", "cost": 100, "cov": 10000, "rel": 0.95, "time": 2, "k_act": 0.80},
-        {"name": "Моб. приложения", "ch": "IP", "cost": 30, "cov": 10000, "rel": 0.95, "time": 2, "k_act": 0.80},
-        {"name": "ТВ-системы", "ch": "Спутник", "cost": 2000, "cov": 10000, "rel": 0.95, "time": 15, "k_act": 0.40},
-        {"name": "ТВ-системы", "ch": "ТВ/радио", "cost": 1000, "cov": 10000, "rel": 0.95, "time": 15, "k_act": 0.40},
-        {"name": "Радиовещание", "ch": "Радио", "cost": 150, "cov": 8000, "rel": 0.95, "time": 10, "k_act": 0.50},
-        {"name": "Радиовещание", "ch": "Спутник", "cost": 1800, "cov": 8000, "rel": 0.95, "time": 15, "k_act": 0.50},
-        {"name": "Радиовещание", "ch": "ТВ/радио", "cost": 800, "cov": 8000, "rel": 0.95, "time": 15, "k_act": 0.50},
-        {"name": "БАС (Дроны)", "ch": "Сотовая", "cost": 300, "cov": 4000, "rel": 0.95, "time": 15, "k_act": 0.85},
-        {"name": "БАС (Дроны)", "ch": "Спутник", "cost": 450, "cov": 4000, "rel": 0.95, "time": 20, "k_act": 0.85}
-    ])
+    # Умный выбор конкретной системы для редактирования
+    tso_names = [f"{item['name']} ({item['ch']})" for item in st.session_state.catalog]
+    selected_tso_name = st.sidebar.selectbox("Выберите систему связи:", tso_names)
+    selected_idx = tso_names.index(selected_tso_name)
+    current_item = st.session_state.catalog[selected_idx]
 
-    edited_catalog_df = st.data_editor(default_catalog, use_container_width=True)
+    # Индивидуальные ползунки для выбранного оборудования
+    new_cost = st.sidebar.number_input("Cost (Стоимость, руб/у.е.)", min_value=10, max_value=20000,
+                                       value=int(current_item['cost']), step=50)
+    new_cov = st.sidebar.number_input("Cov (Тех. охват, чел)", min_value=100, max_value=50000,
+                                      value=int(current_item['cov']), step=500)
+    new_rel = st.sidebar.slider("Rel_base (Базовая надежность)", 0.50, 0.99, float(current_item['rel']), 0.01)
+    new_time = st.sidebar.slider("Time (Время срабатывания, мин)", 1, 60, int(current_item['time']), 1)
+    new_k_act = st.sidebar.slider("K_act (Коэф. вовлеченности)", 0.10, 1.00, float(current_item['k_act']), 0.05)
 
-    if st.button("🚀 ЗАПУСТИТЬ СИМПЛЕКС-МЕТОД", type="primary"):
+    # Динамическое обновление справочника в оперативной памяти
+    st.session_state.catalog[selected_idx].update({
+        'cost': new_cost,
+        'cov': new_cov,
+        'rel': new_rel,
+        'time': new_time,
+        'k_act': new_k_act
+    })
+
+    if st.sidebar.button("🔄 Сбросить ТСО к заводским", use_container_width=True):
+        st.session_state.catalog = [dict(item) for item in DEFAULT_CATALOG]
+        st.rerun()
+
+    # ===== ОСНОВНАЯ ОБЛАСТЬ ЭКРАНА =====
+    st.subheader("📚 Справочник оборудования (Не для редактирования)")
+    st.markdown("Здесь отображаются текущие характеристики. Изменить их можно в **левой панели**.")
+
+    # Выводим строгую DataFrame таблицу без возможности ее испортить кликом
+    df_display_catalog = pd.DataFrame(st.session_state.catalog)
+    df_display_catalog.columns = ['Система', 'Канал связи', 'Cost (Стоимость)', 'Cov (Охват)', 'Rel_base (Надежность)',
+                                  'Time (Время)', 'K_act (Вовлеченность)']
+    st.dataframe(df_display_catalog, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    if st.button("🚀 ЗАПУСТИТЬ ОПТИМИЗАЦИЮ (СИМПЛЕКС-МЕТОД)", type="primary"):
         with st.spinner("Идет расчет глобального оптимума..."):
             df_res, r_in, r_out = run_optimization(data_result, gamma, alpha, b_max_large, b_max_small, q_min,
-                                                   edited_catalog_df)
+                                                   st.session_state.catalog)
 
         df_res['Вероятность_ошибки'] = 1.0 - df_res['Надежность']
         summary_table = df_res.groupby(['ТСО', 'Канал']).agg(
@@ -298,7 +337,7 @@ if data_result is not None:
         col4.metric("Снижение общего риска", f"{r_in:.2f} → {r_out:.2f}",
                     f"-{(((r_in - r_out) / r_in * 100) if r_in > 0 else 0):.1f}%")
 
-        # КАРТА И ДАННЫЕ В TOOLTIP
+        # КАРТА
         layers = []
         if boundary_data:
             layers.append(pdk.Layer("GeoJsonLayer", boundary_data, opacity=0.3, stroked=True, filled=True,
