@@ -6,3 +6,5 @@ pydeck
 requests
 shapely
 openpyxl
+matplotlib
+seaborn
