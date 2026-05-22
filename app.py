@@ -448,31 +448,54 @@ if data_result is not None:
         st.download_button(label="📥 Скачать итоговый реестр (CSV)", data=csv, file_name="TSO_Optimization_Final.csv",
                            mime="text/csv")
 
+
         # ==========================================
-        # БЛОК ИИ-АНАЛИТИКИ
+        # НОВЫЙ БЛОК: ФУНКЦИЯ ИИ-АНАЛИТИКИ
         # ==========================================
-        st.markdown("---")
-        st.subheader("🧠 Экспертный ИИ-анализ результатов")
-        st.info("Нейросеть проанализирует итоговое распределение ТСО и сформирует академическое обоснование.")
+        def generate_ai_insights(summary_df, total_cost, total_coverage, total_population):
+            api_key = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY"))
+            if not api_key:
+                return "⚠️ Ошибка: API-ключ OpenRouter не найден. Убедитесь, что настроили секреты (secrets.toml)."
 
-        if st.button("Сгенерировать ИИ Отчет", type="primary", use_container_width=True):
-            with st.spinner("OpenRouter (ИИ) анализирует математическую модель..."):
-                total_cost = df_res['Стоимость'].sum()
-                total_cov = df_res['Охват'].sum()
-                total_pop = data_result['Население'].sum()
+            try:
+                client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+                data_context = summary_df[
+                    ['Система_и_Канал', 'Количество', 'Общая_стоимость', 'Общий_охват', 'Ср_надежность']].to_string(
+                    index=False)
+                coverage_percent = (total_coverage / total_population * 100) if total_population > 0 else 0
 
-                ai_report = generate_ai_insights(summary_table, total_cost, total_cov, total_pop)
+                prompt = f"""
+                Вы — ведущий эксперт по математическому моделированию и гражданской обороне. 
+                Проанализируйте результаты оптимизации системы оповещения (MILP-модель).
 
-                st.success("Отчет успешно сформирован!")
-                with st.container(border=True):
-                    st.markdown(ai_report)
+                ВВОДНЫЕ ДАННЫЕ:
+                - Общий бюджет внедрения: {total_cost:,.0f} руб.
+                - Охват населения: {total_coverage:,.0f} чел. ({coverage_percent:.1f}% от зоны риска).
+                - Распределение оборудования:
+                {data_context}
 
-                st.download_button(
-                    label="📥 Скачать аналитическую записку (TXT)",
-                    data=ai_report,
-                    file_name="AI_Analytic_Report.txt",
-                    mime="text/plain"
+                ЗАДАЧА:
+                Напишите профессиональный академический отчет (структурированный, без воды).
+
+                СТРУКТУРА:
+                1. Оценка эффективности: Почему модель выбрала именно эти топовые каналы.
+                2. Нишевое распределение: Какую роль играют миноритарные каналы (Радио, Дроны, Провода) в глухих местах.
+                3. Экономический вывод: Окупаемость системы (цена за одного оповещаемого).
+                """
+
+                response = client.chat.completions.create(
+                    model="openai/gpt-4o-mini",
+                    messages=[
+                        {"role": "system",
+                         "content": "Вы строгий Data Scientist и эксперт по ГИС и системам безопасности."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    # ИСПРАВЛЕНИЕ: Используем extra_headers вместо headers
+                    extra_headers={
+                        "HTTP-Referer": "https://github.com/",
+                        "X-Title": "GIS Warning Optimizer"
+                    }
                 )
-
-else:
-    st.info("Ошибка инициализации. Пожалуйста, проверьте наличие всех файлов Excel в рабочей директории проекта.")
+                return response.choices[0].message.content
+            except Exception as e:
+                return f"❌ Ошибка соединения с ИИ: {e}"
