@@ -7,6 +7,8 @@ import json
 import warnings
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
+from openai import OpenAI  # ДОБАВЛЕН ИМПОРТ ИИ
 
 warnings.filterwarnings('ignore')
 sns.set_theme(style="whitegrid")
@@ -35,6 +37,52 @@ DEFAULT_CATALOG = [
 
 if 'catalog' not in st.session_state:
     st.session_state.catalog = [dict(item) for item in DEFAULT_CATALOG]
+
+
+# ==========================================
+# НОВЫЙ БЛОК: ФУНКЦИЯ ИИ-АНАЛИТИКИ
+# ==========================================
+def generate_ai_insights(summary_df, total_cost, total_coverage, total_population):
+    api_key = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY"))
+    if not api_key:
+        return "⚠️ Ошибка: API-ключ OpenRouter не найден. Убедитесь, что настроили секреты (secrets.toml)."
+
+    try:
+        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+        data_context = summary_df[
+            ['Система_и_Канал', 'Количество', 'Общая_стоимость', 'Общий_охват', 'Ср_надежность']].to_string(index=False)
+        coverage_percent = (total_coverage / total_population * 100) if total_population > 0 else 0
+
+        prompt = f"""
+        Вы — ведущий эксперт по математическому моделированию и гражданской обороне. 
+        Проанализируйте результаты оптимизации системы оповещения (MILP-модель).
+
+        ВВОДНЫЕ ДАННЫЕ:
+        - Общий бюджет внедрения: {total_cost:,.0f} руб.
+        - Охват населения: {total_coverage:,.0f} чел. ({coverage_percent:.1f}% от зоны риска).
+        - Распределение оборудования:
+        {data_context}
+
+        ЗАДАЧА:
+        Напишите профессиональный академический отчет (структурированный, без воды).
+
+        СТРУКТУРА:
+        1. Оценка эффективности: Почему модель выбрала именно эти топовые каналы.
+        2. Нишевое распределение: Какую роль играют миноритарные каналы (Радио, Дроны, Провода) в глухих местах.
+        3. Экономический вывод: Окупаемость системы (цена за одного оповещаемого).
+        """
+
+        response = client.chat.completions.create(
+            model="openai/gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Вы строгий Data Scientist и эксперт по ГИС и системам безопасности."},
+                {"role": "user", "content": prompt}
+            ],
+            headers={"HTTP-Referer": "https://github.com/", "X-Title": "GIS Warning Optimizer"}
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"❌ Ошибка соединения с ИИ: {e}"
 
 
 # --- 1. ЗАГРУЗКА ГРАНИЦ ТАТАРСТАНА ---
@@ -329,6 +377,20 @@ if data_result is not None:
         ).reset_index()
         summary_table['Система_и_Канал'] = summary_table['ТСО'] + " (" + summary_table['Канал'] + ")"
 
+        # СОХРАНЯЕМ В СОСТОЯНИЕ (SESSION STATE) ДЛЯ КНОПКИ ИИ
+        st.session_state['opt_run'] = True
+        st.session_state['summary_table'] = summary_table
+        st.session_state['df_res'] = df_res
+        st.session_state['r_in'] = r_in
+        st.session_state['r_out'] = r_out
+
+    # Если оптимизация была запущена хоть раз в этой сессии, отрисовываем результаты
+    if st.session_state.get('opt_run', False):
+        df_res = st.session_state['df_res']
+        summary_table = st.session_state['summary_table']
+        r_in = st.session_state['r_in']
+        r_out = st.session_state['r_out']
+
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Всего кластеров", len(df_res))
         col2.metric("Установлено новых ТСО",
@@ -385,5 +447,32 @@ if data_result is not None:
         csv = df_res.to_csv(index=False).encode('utf-8')
         st.download_button(label="📥 Скачать итоговый реестр (CSV)", data=csv, file_name="TSO_Optimization_Final.csv",
                            mime="text/csv")
+
+        # ==========================================
+        # БЛОК ИИ-АНАЛИТИКИ
+        # ==========================================
+        st.markdown("---")
+        st.subheader("🧠 Экспертный ИИ-анализ результатов")
+        st.info("Нейросеть проанализирует итоговое распределение ТСО и сформирует академическое обоснование.")
+
+        if st.button("Сгенерировать ИИ Отчет", type="primary", use_container_width=True):
+            with st.spinner("OpenRouter (ИИ) анализирует математическую модель..."):
+                total_cost = df_res['Стоимость'].sum()
+                total_cov = df_res['Охват'].sum()
+                total_pop = data_result['Население'].sum()
+
+                ai_report = generate_ai_insights(summary_table, total_cost, total_cov, total_pop)
+
+                st.success("Отчет успешно сформирован!")
+                with st.container(border=True):
+                    st.markdown(ai_report)
+
+                st.download_button(
+                    label="📥 Скачать аналитическую записку (TXT)",
+                    data=ai_report,
+                    file_name="AI_Analytic_Report.txt",
+                    mime="text/plain"
+                )
+
 else:
     st.info("Ошибка инициализации. Пожалуйста, проверьте наличие всех файлов Excel в рабочей директории проекта.")
