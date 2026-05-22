@@ -8,7 +8,7 @@ import warnings
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
-from openai import OpenAI  # ДОБАВЛЕН ИМПОРТ ИИ
+from openai import OpenAI
 
 warnings.filterwarnings('ignore')
 sns.set_theme(style="whitegrid")
@@ -40,12 +40,12 @@ if 'catalog' not in st.session_state:
 
 
 # ==========================================
-# НОВЫЙ БЛОК: ФУНКЦИЯ ИИ-АНАЛИТИКИ
+# ФУНКЦИЯ ИИ-АНАЛИТИКИ (С ИСПРАВЛЕННЫМИ extra_headers)
 # ==========================================
 def generate_ai_insights(summary_df, total_cost, total_coverage, total_population):
     api_key = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY"))
     if not api_key:
-        return "⚠️ Ошибка: API-ключ OpenRouter не найден. Убедитесь, что настроили секреты (secrets.toml)."
+        return "⚠️ Ошибка: API-ключ OpenRouter не найден. Убедитесь, что вы добавили его в Secrets на сайте Streamlit."
 
     try:
         client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
@@ -78,7 +78,10 @@ def generate_ai_insights(summary_df, total_cost, total_coverage, total_populatio
                 {"role": "system", "content": "Вы строгий Data Scientist и эксперт по ГИС и системам безопасности."},
                 {"role": "user", "content": prompt}
             ],
-            headers={"HTTP-Referer": "https://github.com/", "X-Title": "GIS Warning Optimizer"}
+            extra_headers={
+                "HTTP-Referer": "https://github.com/",
+                "X-Title": "GIS Warning Optimizer"
+            }
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -325,13 +328,11 @@ if data_result is not None:
     st.sidebar.header("🛠️ Константы конкретного ТСО")
     st.sidebar.markdown("*(Выберите систему из списка, чтобы изменить её 5 параметров)*")
 
-    # Умный выбор конкретной системы для редактирования
     tso_names = [f"{item['name']} ({item['ch']})" for item in st.session_state.catalog]
     selected_tso_name = st.sidebar.selectbox("Выберите систему связи:", tso_names)
     selected_idx = tso_names.index(selected_tso_name)
     current_item = st.session_state.catalog[selected_idx]
 
-    # Индивидуальные ползунки для выбранного оборудования
     new_cost = st.sidebar.number_input("Cost (Стоимость, руб/у.е.)", min_value=10, max_value=20000,
                                        value=int(current_item['cost']), step=50)
     new_cov = st.sidebar.number_input("Cov (Тех. охват, чел)", min_value=100, max_value=50000,
@@ -340,7 +341,6 @@ if data_result is not None:
     new_time = st.sidebar.slider("Time (Время срабатывания, мин)", 1, 60, int(current_item['time']), 1)
     new_k_act = st.sidebar.slider("K_act (Коэф. вовлеченности)", 0.10, 1.00, float(current_item['k_act']), 0.05)
 
-    # Динамическое обновление справочника в оперативной памяти
     st.session_state.catalog[selected_idx].update({
         'cost': new_cost,
         'cov': new_cov,
@@ -357,7 +357,6 @@ if data_result is not None:
     st.subheader("📚 Справочник оборудования (Не для редактирования)")
     st.markdown("Здесь отображаются текущие характеристики. Изменить их можно в **левой панели**.")
 
-    # Выводим строгую DataFrame таблицу без возможности ее испортить кликом
     df_display_catalog = pd.DataFrame(st.session_state.catalog)
     df_display_catalog.columns = ['Система', 'Канал связи', 'Cost (Стоимость)', 'Cov (Охват)', 'Rel_base (Надежность)',
                                   'Time (Время)', 'K_act (Вовлеченность)']
@@ -377,14 +376,13 @@ if data_result is not None:
         ).reset_index()
         summary_table['Система_и_Канал'] = summary_table['ТСО'] + " (" + summary_table['Канал'] + ")"
 
-        # СОХРАНЯЕМ В СОСТОЯНИЕ (SESSION STATE) ДЛЯ КНОПКИ ИИ
+        # Сохранение состояния для ИИ
         st.session_state['opt_run'] = True
         st.session_state['summary_table'] = summary_table
         st.session_state['df_res'] = df_res
         st.session_state['r_in'] = r_in
         st.session_state['r_out'] = r_out
 
-    # Если оптимизация была запущена хоть раз в этой сессии, отрисовываем результаты
     if st.session_state.get('opt_run', False):
         df_res = st.session_state['df_res']
         summary_table = st.session_state['summary_table']
@@ -448,54 +446,31 @@ if data_result is not None:
         st.download_button(label="📥 Скачать итоговый реестр (CSV)", data=csv, file_name="TSO_Optimization_Final.csv",
                            mime="text/csv")
 
-
         # ==========================================
-        # НОВЫЙ БЛОК: ФУНКЦИЯ ИИ-АНАЛИТИКИ
+        # БЛОК ИИ-АНАЛИТИКИ
         # ==========================================
-        def generate_ai_insights(summary_df, total_cost, total_coverage, total_population):
-            api_key = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY"))
-            if not api_key:
-                return "⚠️ Ошибка: API-ключ OpenRouter не найден. Убедитесь, что настроили секреты (secrets.toml)."
+        st.markdown("---")
+        st.subheader("🧠 Экспертный ИИ-анализ результатов")
+        st.info("Нейросеть проанализирует итоговое распределение ТСО и сформирует академическое обоснование.")
 
-            try:
-                client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
-                data_context = summary_df[
-                    ['Система_и_Канал', 'Количество', 'Общая_стоимость', 'Общий_охват', 'Ср_надежность']].to_string(
-                    index=False)
-                coverage_percent = (total_coverage / total_population * 100) if total_population > 0 else 0
+        if st.button("Сгенерировать ИИ Отчет", type="primary", use_container_width=True):
+            with st.spinner("OpenRouter (ИИ) анализирует математическую модель..."):
+                total_cost = df_res['Стоимость'].sum()
+                total_cov = df_res['Охват'].sum()
+                total_pop = data_result['Население'].sum()
 
-                prompt = f"""
-                Вы — ведущий эксперт по математическому моделированию и гражданской обороне. 
-                Проанализируйте результаты оптимизации системы оповещения (MILP-модель).
+                ai_report = generate_ai_insights(summary_table, total_cost, total_cov, total_pop)
 
-                ВВОДНЫЕ ДАННЫЕ:
-                - Общий бюджет внедрения: {total_cost:,.0f} руб.
-                - Охват населения: {total_coverage:,.0f} чел. ({coverage_percent:.1f}% от зоны риска).
-                - Распределение оборудования:
-                {data_context}
+                st.success("Отчет успешно сформирован!")
+                with st.container(border=True):
+                    st.markdown(ai_report)
 
-                ЗАДАЧА:
-                Напишите профессиональный академический отчет (структурированный, без воды).
-
-                СТРУКТУРА:
-                1. Оценка эффективности: Почему модель выбрала именно эти топовые каналы.
-                2. Нишевое распределение: Какую роль играют миноритарные каналы (Радио, Дроны, Провода) в глухих местах.
-                3. Экономический вывод: Окупаемость системы (цена за одного оповещаемого).
-                """
-
-                response = client.chat.completions.create(
-                    model="openai/gpt-4o-mini",
-                    messages=[
-                        {"role": "system",
-                         "content": "Вы строгий Data Scientist и эксперт по ГИС и системам безопасности."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    # ИСПРАВЛЕНИЕ: Используем extra_headers вместо headers
-                    extra_headers={
-                        "HTTP-Referer": "https://github.com/",
-                        "X-Title": "GIS Warning Optimizer"
-                    }
+                st.download_button(
+                    label="📥 Скачать аналитическую записку (TXT)",
+                    data=ai_report,
+                    file_name="AI_Analytic_Report.txt",
+                    mime="text/plain"
                 )
-                return response.choices[0].message.content
-            except Exception as e:
-                return f"❌ Ошибка соединения с ИИ: {e}"
+
+else:
+    st.info("Ошибка инициализации. Пожалуйста, проверьте наличие всех файлов Excel в рабочей директории проекта.")
