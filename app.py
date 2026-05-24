@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore')
 sns.set_theme(style="whitegrid")
 
 # --- НАСТРОЙКА СТРАНИЦЫ ---
-st.set_page_config(page_title="ГИС Оптимизация ТСО v5.1", layout="wide", page_icon="🌍")
+st.set_page_config(page_title="ГИС Оптимизация ТСО v5.2", layout="wide")
 
 # --- ИНИЦИАЛИЗАЦИЯ БАЗОВОГО КАТАЛОГА В ПАМЯТИ ---
 DEFAULT_CATALOG = [
@@ -47,7 +47,7 @@ if 'catalog' not in st.session_state:
 def generate_ai_insights(summary_df, total_cost, total_coverage, total_population):
     api_key = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY"))
     if not api_key:
-        return "⚠️ Ошибка: API-ключ OpenRouter не найден. Убедитесь, что вы добавили его в Secrets на сайте Streamlit."
+        return "Ошибка: API-ключ OpenRouter не найден. Убедитесь, что вы добавили его в конфигурацию среды."
 
     try:
         client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
@@ -56,28 +56,29 @@ def generate_ai_insights(summary_df, total_cost, total_coverage, total_populatio
         coverage_percent = (total_coverage / total_population * 100) if total_population > 0 else 0
 
         prompt = f"""
-        Вы — ведущий эксперт по математическому моделированию и гражданской обороне. 
-        Проанализируйте результаты оптимизации системы оповещения (MILP-модель).
+        Вы — руководитель аналитического центра межведомственной комиссии по гражданской обороне и ликвидации чрезвычайных ситуаций.
 
-        ВВОДНЫЕ ДАННЫЕ:
-        - Общий бюджет внедрения: {total_cost:,.0f} у.е.
-        - Охват населения: {total_coverage:,.0f} чел. ({coverage_percent:.1f}% от зоны риска).
-        - Распределение оборудования:
+        ВВОДНЫЕ ДАННЫЕ ПРОЕКТА РАСЦО:
+        - Итоговый бюджет распределения: {total_cost:,.0f} у.е.
+        - Расчетный охват населения: {total_coverage:,.0f} чел. ({coverage_percent:.1f}% от всей зоны риска).
+        - Итоговая номенклатура распределенного оборудования:
         {data_context}
 
         ЗАДАЧА:
-        Напишите профессиональную официальную аналитическую записку. Текст должен быть строгим, структурированным и без эмоций или общих фраз.
+        Сформируйте официальную аналитическую записку по результатам оптимизационного математического моделирования. 
+        Текст должен быть написан в строгом официально-деловом и академическом стиле (как документ для министра или ТЭО проекта). Никаких общих фраз, только конкретика.
 
-        СТРУКТУРА ОТЧЕТА СТРОГО:
-        1. Итоговая сводка развертывания оборудования (прямо и четко перечислите, сколько единиц каждого типа ТСО требуется закупить, например: "Сирен С-40 - X шт., SMS-рассылок - Y шт." на основе вводных данных).
-        2. Оценка эффективности (почему модель выбрала именно это распределение с учетом бюджета и охвата).
-        3. Рекомендации по модернизации (практические и управленческие шаги по внедрению).
+        СТРУКТУРА ДОКУМЕНТА (ОБЯЗАТЕЛЬНО):
+        1. ВВЕДЕНИЕ: Краткое обоснование перехода к расчету комплексного мультириска (пожары и подтопления).
+        2. ИТОГОВАЯ ВЕДОМСТВЕННАЯ СВОДКА: Жесткий перечень закупаемого оборудования. (Например: "К закупке утверждено: Системы SMS-оповещения - X шт., Речевые установки (IP) - Y шт."). Данные брать строго из вводных.
+        3. АНАЛИЗ ЭФФЕКТИВНОСТИ МОДЕЛИ: Научно-техническое объяснение, почему Симплекс-метод выбрал именно эти каналы связи с точки зрения рентабельности и радиуса акустического/информационного охвата.
+        4. РЕКОМЕНДАЦИИ ПО ИНТЕГРАЦИИ: 3-4 развернутых и практических пункта по дальнейшим шагам внедрения, интеграции с существующими системами и поддержанию технической готовности.
         """
 
         response = client.chat.completions.create(
             model="openai/gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Вы строгий Data Scientist и эксперт по ГИС и системам безопасности."},
+                {"role": "system", "content": "Вы — эксперт-аналитик по математическому моделированию систем безопасности. Пишете сухим, строгим канцелярским и академическим языком."},
                 {"role": "user", "content": prompt}
             ],
             extra_headers={
@@ -87,7 +88,7 @@ def generate_ai_insights(summary_df, total_cost, total_coverage, total_populatio
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"❌ Ошибка соединения с ИИ: {e}"
+        return f"Ошибка соединения с ИИ: {e}"
 
 
 # --- 1. ЗАГРУЗКА ГРАНИЦ ТАТАРСТАНА ---
@@ -175,7 +176,7 @@ def load_data():
 
 
 # --- 3. ЖЕСТКАЯ МАТЕМАТИЧЕСКАЯ МОДЕЛЬ ---
-def run_optimization(df_zones, gamma, alpha, budget_large, budget_small, q_min, catalog_list):
+def run_optimization(df_zones, w_fire, w_flood, alpha, budget_large, budget_small, q_min, catalog_list):
     catalog = catalog_list
 
     def calc_q_dyn(equip, r_f, r_w, d2, d4, pop):
@@ -233,7 +234,8 @@ def run_optimization(df_zones, gamma, alpha, budget_large, budget_small, q_min, 
 
     for j, row in df_zones.iterrows():
         vars_dict[j] = {}
-        R_base = (gamma * row['Индекс_Огня']) + ((1 - gamma) * row['Индекс_Воды'])
+        # Интегральный мультириск на основе заданных весов
+        R_base = (w_fire * row['Индекс_Огня']) + (w_flood * row['Индекс_Воды'])
         init_risk += R_base
 
         if row['Старая_сирена'] == "ДА":
@@ -255,7 +257,10 @@ def run_optimization(df_zones, gamma, alpha, budget_large, budget_small, q_min, 
             if equip["cost"] <= curr_b and Q >= q_min:
                 valid_keys.append(k)
                 O = min(equip["cov"], row['Население']) * equip["k_act"]
-                tf = (60 - equip["time"]) / 60.0
+                
+                # Масштабирование времени (в секундах). Максимальное расчетное время 3600 сек.
+                tf = max(0.1, (3600 - equip["time"]) / 3600.0)
+                
                 red = (Q * O * tf) / (row['Население'] * alpha + 1)
                 obj_terms.append(-R_base * red * v)
             else:
@@ -318,29 +323,34 @@ data_result = load_data()
 if data_result is not None:
     # ===== ЛЕВАЯ ПАНЕЛЬ (SIDEBAR) =====
     st.sidebar.header("Глобальные системные константы")
-    gamma = st.sidebar.slider("γ (Gamma) — Вес риска ПОЖАРОВ", 0.0, 1.0, 0.6, 0.05)
-    alpha = st.sidebar.slider("α (Alpha) — Коэф. масштабирования", 0.1, 1.5, 0.9, 0.1)
-    q_min = st.sidebar.slider("Q_MIN — Порог надежности ТСО", 0.1, 0.9, 0.60, 0.05)
+    
+    # Новый балансировочный механизм весов рисков
+    w_flood = st.sidebar.slider("Вес риска наводнений", 0.0, 1.0, 0.4, 0.1)
+    w_fire = round(1.0 - w_flood, 1)
+    st.sidebar.metric("Вес риска пожаров", w_fire)
 
-    st.sidebar.markdown("**B_max (Локальный бюджет):**")
+    alpha = st.sidebar.slider("Коэф. масштабирования (α)", 0.1, 1.5, 0.9, 0.1)
+    q_min = st.sidebar.slider("Порог надежности ТСО (Q_min)", 0.1, 0.9, 0.60, 0.05)
+
+    st.sidebar.markdown("**Локальный бюджетный лимит:**")
     b_max_large = st.sidebar.number_input("Бюджет (Население > 500 чел)", 1000, 20000, 3000, 500)
     b_max_small = st.sidebar.number_input("Бюджет (Население ≤ 500 чел)", 50, 5000, 500, 50)
 
     st.sidebar.markdown("---")
     st.sidebar.header("Константы ТСО")
-    st.sidebar.markdown("*(Выберите систему из списка, чтобы изменить её 5 параметров)*")
+    st.sidebar.markdown("*(Выберите систему из списка, чтобы изменить 5 параметров)*")
 
     tso_names = [f"{item['name']} ({item['ch']})" for item in st.session_state.catalog]
-    selected_tso_name = st.sidebar.selectbox("Выберите систему связи:", tso_names)
+    selected_tso_name = st.sidebar.selectbox("Выберите ТСО", tso_names)
     selected_idx = tso_names.index(selected_tso_name)
     current_item = st.session_state.catalog[selected_idx]
 
-    new_cost = st.sidebar.number_input("Cost (Стоимость, руб/у.е.)", min_value=10, max_value=20000,
+    new_cost = st.sidebar.number_input("Cost (Стоимость, у.е.)", min_value=10, max_value=20000,
                                        value=int(current_item['cost']), step=50)
     new_cov = st.sidebar.number_input("Cov (Тех. охват, чел)", min_value=100, max_value=50000,
                                       value=int(current_item['cov']), step=500)
     new_rel = st.sidebar.slider("Rel_base (Базовая надежность)", 0.50, 0.99, float(current_item['rel']), 0.01)
-    new_time = st.sidebar.slider("Time (Время срабатывания, мин)", 1, 60, int(current_item['time']), 1)
+    new_time = st.sidebar.number_input("Time (Время срабатывания, сек)", min_value=1, max_value=3600, value=int(current_item['time']), step=1)
     new_k_act = st.sidebar.slider("K_act (Коэф. вовлеченности)", 0.10, 1.00, float(current_item['k_act']), 0.05)
 
     st.session_state.catalog[selected_idx].update({
@@ -351,13 +361,13 @@ if data_result is not None:
         'k_act': new_k_act
     })
 
-    if st.sidebar.button("Сбросить данные", use_container_width=True):
+    if st.sidebar.button("Сбросить данные к заводским", use_container_width=True):
         st.session_state.catalog = [dict(item) for item in DEFAULT_CATALOG]
         st.rerun()
 
     # ===== ОСНОВНАЯ ОБЛАСТЬ ЭКРАНА =====
     st.subheader("Справочник оборудования")
-    st.markdown("Здесь отображаются текущие характеристики. Изменить их можно в **левой панели**.")
+    st.markdown("Отображение текущих характеристик. Изменить значения можно в **левой панели**.")
 
     df_display_catalog = pd.DataFrame(st.session_state.catalog)
     df_display_catalog.columns = ['Система', 'Канал связи', 'Cost (Стоимость)', 'Cov (Охват)', 'Rel_base (Надежность)',
@@ -367,8 +377,8 @@ if data_result is not None:
     st.markdown("---")
 
     if st.button("ЗАПУСТИТЬ ОПТИМИЗАЦИЮ", type="primary"):
-        with st.spinner("Идет расчет глобального оптимума..."):
-            df_res, r_in, r_out = run_optimization(data_result, gamma, alpha, b_max_large, b_max_small, q_min,
+        with st.spinner("Ожидайте. Идет расчет глобального оптимума..."):
+            df_res, r_in, r_out = run_optimization(data_result, w_fire, w_flood, alpha, b_max_large, b_max_small, q_min,
                                                    st.session_state.catalog)
 
         df_res['Вероятность_ошибки'] = 1.0 - df_res['Надежность']
@@ -410,13 +420,10 @@ if data_result is not None:
 
         df_old = df_res[df_res['ТСО'] == 'ОБОРУДОВАНО СТАРОЙ СИРЕНОЙ'].copy()
         if not df_old.empty:
-            df_old['icon'] = '🚨'
+            # Замена эмодзи на визуальный круг для сохранения официального стиля
             layers.append(pdk.Layer("ScatterplotLayer", data=df_old, get_position=["Долгота", "Широта"],
                                     get_fill_color=[0, 0, 0, 0], get_line_color=[50, 200, 50, 255], get_radius=600,
                                     stroked=True, line_width_min_pixels=3, pickable=True))
-            layers.append(
-                pdk.Layer("TextLayer", data=df_old, get_position=["Долгота", "Широта"], get_text="icon", get_size=20,
-                          get_alignment_baseline="'bottom'"))
 
         st.pydeck_chart(pdk.Deck(
             layers=layers,
@@ -426,52 +433,57 @@ if data_result is not None:
                 "html": "<b>{Н.П.}</b> ({Район})<br/><b>Население:</b> {Население} чел.<br/><b>Угроза:</b> {Тип угрозы}<br/><b>Выбрано:</b> {ТСО} ({Канал})<br/><b>Стоимость:</b> {Стоимость} у.е.<br/><b>Охват:</b> {Охват} чел.<br/><b>Надежность:</b> {Надежность}"}
         ))
 
-        st.subheader("Аналитические графики эффективности")
-        g1, g2 = st.columns(2)
-        with g1:
-            fig1, ax1 = plt.subplots(figsize=(8, 5))
-            sns.barplot(data=summary_table.sort_values('Количество', ascending=False), x='Количество',
-                        y='Система_и_Канал', palette='viridis', ax=ax1)
-            ax1.set_title('Частота распределения ТСО по регионам', fontsize=12, fontweight='bold')
-            st.pyplot(fig1)
-        with g2:
-            fig2, ax2 = plt.subplots(figsize=(8, 5))
-            sns.barplot(data=summary_table.sort_values('Общий_охват', ascending=False), x='Общий_охват',
-                        y='Система_и_Канал', palette='magma', ax=ax2)
-            ax2.set_title('Гарантированный охват населения по типам ТСО', fontsize=12, fontweight='bold')
-            st.pyplot(fig2)
-
-        st.subheader("Детальный реестр кластеров")
+        st.subheader("Реестр кластеров")
         st.dataframe(df_res, use_container_width=True)
         csv = df_res.to_csv(index=False).encode('utf-8')
         st.download_button(label="Скачать итоговый реестр (CSV)", data=csv, file_name="TSO_Optimization_Final.csv",
                            mime="text/csv")
 
         # ==========================================
-        # БЛОК ИИ-АНАЛИТИКИ
+        # БЛОК ИИ-АНАЛИТИКИ И ГРАФИКОВ
         # ==========================================
         st.markdown("---")
         st.subheader("ИИ-анализ результатов")
-        st.info("Нейросеть проанализирует итоговое распределение ТСО и сформирует официальную академическую записку.")
-
+        
         if st.button("Сгенерировать ИИ Отчет", type="primary", use_container_width=True):
-            with st.spinner("OpenRouter (ИИ) формирует аналитическую записку..."):
+            with st.spinner("Система анализирует данные и формирует официальный документ..."):
                 total_cost = df_res['Стоимость'].sum()
                 total_cov = df_res['Охват'].sum()
                 total_pop = data_result['Население'].sum()
 
                 ai_report = generate_ai_insights(summary_table, total_cost, total_cov, total_pop)
 
-                st.success("Отчет успешно сформирован!")
+                st.success("Аналитическая записка сформирована успешно.")
+                
+                # Текстовый вывод отчета
                 with st.container(border=True):
                     st.markdown(ai_report)
+                
+                # Отрисовка графиков непосредственно под отчетом, как итоговая сводка
+                st.markdown("### Приложение 1. Визуализация структуры распределения оборудования")
+                g1, g2 = st.columns(2)
+                with g1:
+                    fig1, ax1 = plt.subplots(figsize=(8, 5))
+                    sns.barplot(data=summary_table.sort_values('Количество', ascending=False), x='Количество',
+                                y='Система_и_Канал', palette='viridis', ax=ax1)
+                    ax1.set_title('Объем закупки ТСО по номенклатуре', fontsize=12, fontweight='bold')
+                    ax1.set_xlabel('Количество (единиц)')
+                    ax1.set_ylabel('')
+                    st.pyplot(fig1)
+                with g2:
+                    fig2, ax2 = plt.subplots(figsize=(8, 5))
+                    sns.barplot(data=summary_table.sort_values('Общий_охват', ascending=False), x='Общий_охват',
+                                y='Система_и_Канал', palette='magma', ax=ax2)
+                    ax2.set_title('Прогнозируемый охват населения', fontsize=12, fontweight='bold')
+                    ax2.set_xlabel('Охват (человек)')
+                    ax2.set_ylabel('')
+                    st.pyplot(fig2)
 
-                # Создание DOCX в памяти
+                # Создание DOCX файла
                 try:
                     doc = Document()
-                    doc.add_heading('Официальная аналитическая записка по результатам моделирования', level=1)
+                    doc.add_heading('АНАЛИТИЧЕСКАЯ ЗАПИСКА ПО РЕЗУЛЬТАТАМ МОДЕЛИРОВАНИЯ', level=1)
                     
-                    # Простой парсинг текста для переноса в документ
                     for paragraph in ai_report.split('\n'):
                         if paragraph.strip():
                             doc.add_paragraph(paragraph.strip())
@@ -480,13 +492,13 @@ if data_result is not None:
                     doc.save(bio)
 
                     st.download_button(
-                        label="Скачать аналитическую записку (DOCX)",
+                        label="Скачать официальный отчет (DOCX)",
                         data=bio.getvalue(),
-                        file_name="AI_Analytic_Report.docx",
+                        file_name="Analytic_Report_Official.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     )
                 except Exception as e:
-                    st.error(f"Не удалось сформировать файл DOCX: {e}")
+                    st.error(f"Ошибка формирования файла Word (DOCX): {e}")
 
 else:
-    st.info("Ошибка инициализации. Пожалуйста, проверьте наличие всех файлов Excel в рабочей директории проекта.")
+    st.info("Внимание: Отсутствуют требуемые исходные файлы данных (Excel/GeoJSON). Загрузка прервана.")
