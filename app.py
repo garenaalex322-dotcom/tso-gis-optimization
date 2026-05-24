@@ -10,14 +10,15 @@ import seaborn as sns
 import os
 from openai import OpenAI
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from io import BytesIO
 
 warnings.filterwarnings('ignore')
 sns.set_theme(style="whitegrid")
 
 # --- НАСТРОЙКА СТРАНИЦЫ ---
-st.set_page_config(page_title="ГИС Оптимизация ТСО v5.3", layout="wide")
+st.set_page_config(page_title="ГИС Оптимизация ТСО v5.4", layout="wide")
 
 # --- ИНИЦИАЛИЗАЦИЯ БАЗОВОГО КАТАЛОГА В ПАМЯТИ ---
 DEFAULT_CATALOG = [
@@ -43,17 +44,15 @@ if 'catalog' not in st.session_state:
 
 
 # ==========================================
-# ФУНКЦИЯ ИИ-АНАЛИТИКИ (ИСПОЛЬЗУЕТСЯ МОЩНАЯ МОДЕЛЬ GPT-4o)
+# ФУНКЦИЯ ИИ-АНАЛИТИКИ
 # ==========================================
-def generate_ai_insights(summary_df, total_cost, total_coverage, total_population):
+def generate_ai_insights(total_cost, total_coverage, total_population):
     api_key = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY"))
     if not api_key:
         return "Ошибка: API-ключ OpenRouter не найден. Убедитесь, что вы добавили его в конфигурацию среды."
 
     try:
         client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
-        data_context = summary_df[
-            ['Система_и_Канал', 'Количество', 'Общая_стоимость', 'Общий_охват', 'Ср_надежность']].to_string(index=False)
         coverage_percent = (total_coverage / total_population * 100) if total_population > 0 else 0
 
         prompt = f"""
@@ -62,26 +61,24 @@ def generate_ai_insights(summary_df, total_cost, total_coverage, total_populatio
         ВВОДНЫЕ ДАННЫЕ ПРОЕКТА:
         - Итоговый бюджет распределения: {total_cost:,.0f} у.е.
         - Расчетный охват населения: {total_coverage:,.0f} чел. ({coverage_percent:.1f}% от всей зоны риска).
-        - Итоговая номенклатура распределенного оборудования:
-        {data_context}
 
         ЗАДАЧА:
-        Сформируйте красивую, официальную и глубоко проработанную аналитическую записку. Документ должен выглядеть так, будто его составил живой эксперт высокого уровня. Используйте деловой стиль, четкие формулировки, маркированные списки и выверенную структуру.
+        Сформируйте официальную аналитическую записку.
+        КРИТИЧЕСКОЕ ТРЕБОВАНИЕ: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown-разметку (никаких звездочек **, решеток ###, жирного шрифта или курсива). Используйте строго обычный текст, нумерацию (1., 2.) и абзацы.
 
-        СТРУКТУРА И ИНСТРУКЦИИ ДЛЯ ИНТЕГРАЦИИ ГРАФИКОВ:
+        СТРУКТУРА:
         1. ВВЕДЕНИЕ: Обоснование применения симплекс-метода и расчета мультириска.
-        2. ИТОГОВАЯ ВЕДОМСТВЕННАЯ СВОДКА: Жесткий перечень закупаемого оборудования с указанием количества и каналов связи.
-        ВНИМАНИЕ: Сразу после списка оборудования напишите ровно один тег: [ГРАФИК_РАСПРЕДЕЛЕНИЯ]
-        3. АНАЛИЗ ЭФФЕКТИВНОСТИ: Объяснение, почему выбрано именно такое оборудование с точки зрения соотношения цена/качество/скорость.
-        ВНИМАНИЕ: Сразу после этого раздела напишите ровно один тег: [ГРАФИК_ОХВАТА]
-        4. РЕКОМЕНДАЦИИ ПО ИНТЕГРАЦИИ: 3-4 конкретных шага по внедрению и эксплуатации системы.
+        [ТАБЛИЦА_ОБОРУДОВАНИЯ] (напишите этот тег ровно в этом месте)
+        2. АНАЛИЗ ЭФФЕКТИВНОСТИ: Научное объяснение выбора каналов связи с точки зрения рентабельности.
+        [ГРАФИК_РАСПРЕДЕЛЕНИЯ] (напишите этот тег ровно в этом месте)
+        [ГРАФИК_ОХВАТА] (напишите этот тег ровно в этом месте)
+        3. РЕКОМЕНДАЦИИ ПО ИНТЕГРАЦИИ: 3-4 конкретных шага по внедрению и эксплуатации системы.
         """
 
-        # Выбираем флагманскую модель для лучшего стиля написания
         response = client.chat.completions.create(
             model="openai/gpt-4o",
             messages=[
-                {"role": "system", "content": "Вы эксперт-аналитик экстра-класса. Пишете официальным, структурированным, но при этом живым и понятным языком."},
+                {"role": "system", "content": "Вы строгий и профессиональный государственный аналитик. Не используете эмоции и спецсимволы в тексте."},
                 {"role": "user", "content": prompt}
             ],
             extra_headers={
@@ -89,7 +86,9 @@ def generate_ai_insights(summary_df, total_cost, total_coverage, total_populatio
                 "X-Title": "GIS Warning Optimizer"
             }
         )
-        return response.choices[0].message.content
+        # Принудительная очистка текста от любых оставшихся Markdown символов
+        clean_text = response.choices[0].message.content.replace('*', '').replace('#', '')
+        return clean_text
     except Exception as e:
         return f"Ошибка соединения с ИИ: {e}"
 
@@ -339,10 +338,13 @@ if data_result is not None:
         'k_act': new_k_act
     })
 
-    if st.sidebar.button("Сбросить данные", use_container_width=True):
+    if st.sidebar.button("Сбросить данные к заводским", use_container_width=True):
         st.session_state.catalog = [dict(item) for item in DEFAULT_CATALOG]
         st.rerun()
 
+    # ===== ОСНОВНАЯ ОБЛАСТЬ ЭКРАНА =====
+    st.subheader("Технологические ограничения структуры каналов связи")
+    st.info("Примечание к архитектуре сети: В текущей итерации моделирования математическое соотношение использования радиоканалов было принудительно уменьшено. Данное изменение обусловлено сужением доступного частотного диапазона и ужесточением нормативных требований к выделенным радиочастотам в зонах сочетанных природных рисков. Рекомендуется приоритетное развитие альтернативных IP и проводных каналов.")
 
     st.subheader("Справочник оборудования")
     df_display_catalog = pd.DataFrame(st.session_state.catalog)
@@ -409,24 +411,24 @@ if data_result is not None:
         st.download_button(label="Скачать итоговый реестр (CSV)", data=csv, file_name="TSO_Optimization_Final.csv", mime="text/csv")
 
         # ==========================================
-        # БЛОК ИИ-АНАЛИТИКИ И КРАСИВОГО ОТЧЕТА
+        # БЛОК ИИ-АНАЛИТИКИ
         # ==========================================
         st.markdown("---")
         st.subheader("ИИ-анализ результатов")
         
         if st.button("Сгенерировать ИИ Отчет", type="primary", use_container_width=True):
-            with st.spinner("Нейросеть (GPT-4o) анализирует данные и верстает официальный документ..."):
+            with st.spinner("Аналитическая подсистема (GPT-4o) верстает официальный документ..."):
                 total_cost = df_res['Стоимость'].sum()
                 total_cov = df_res['Охват'].sum()
                 total_pop = data_result['Население'].sum()
 
-                # Генерация текста отчета
-                ai_report = generate_ai_insights(summary_table, total_cost, total_cov, total_pop)
+                # Генерация текста отчета без Markdown
+                ai_report = generate_ai_insights(total_cost, total_cov, total_pop)
 
                 # Генерация графиков в память
                 fig1, ax1 = plt.subplots(figsize=(7, 4))
                 sns.barplot(data=summary_table.sort_values('Количество', ascending=False), x='Количество', y='Система_и_Канал', palette='Blues_r', ax=ax1)
-                ax1.set_title('Объем закупки оборудования', fontsize=11, fontweight='bold')
+                ax1.set_title('Спецификация распределения ТСО', fontsize=11, fontweight='bold')
                 ax1.set_xlabel('Количество (единиц)')
                 ax1.set_ylabel('')
                 plt.tight_layout()
@@ -448,44 +450,79 @@ if data_result is not None:
 
                 st.success("Аналитическая записка сформирована.")
                 
-                # РЕНДЕРИНГ В ИНТЕРФЕЙСЕ STREAMLIT (парсинг тегов)
+                # РЕНДЕРИНГ В ИНТЕРФЕЙСЕ (с заменой тегов на реальные таблицы и графики)
                 with st.container(border=True):
-                    parts1 = ai_report.split('[ГРАФИК_РАСПРЕДЕЛЕНИЯ]')
-                    st.markdown(parts1[0])
-                    if len(parts1) > 1:
-                        st.image(img1_stream)
-                        parts2 = parts1[1].split('[ГРАФИК_ОХВАТА]')
-                        st.markdown(parts2[0])
+                    parts = ai_report.split('[ТАБЛИЦА_ОБОРУДОВАНИЯ]')
+                    st.text(parts[0].strip())
+                    
+                    if len(parts) > 1:
+                        # Вставляем красивую таблицу в интерфейс
+                        display_df = summary_table[['Система_и_Канал', 'Количество', 'Общий_охват', 'Общая_стоимость']]
+                        display_df.columns = ['Тип оборудования', 'Закупка (шт.)', 'Охват (чел.)', 'Бюджет (у.е.)']
+                        st.table(display_df)
+                        
+                        parts2 = parts[1].split('[ГРАФИК_РАСПРЕДЕЛЕНИЯ]')
+                        st.text(parts2[0].strip())
+                        
                         if len(parts2) > 1:
-                            st.image(img2_stream)
-                            st.markdown(parts2[1])
+                            st.image(img1_stream)
+                            parts3 = parts2[1].split('[ГРАФИК_ОХВАТА]')
+                            st.text(parts3[0].strip())
+                            
+                            if len(parts3) > 1:
+                                st.image(img2_stream)
+                                st.text(parts3[1].strip())
 
-                # СОЗДАНИЕ КРАСИВОГО DOCX ФАЙЛА
+                # СОЗДАНИЕ ОФИЦИАЛЬНОГО DOCX ФАЙЛА
                 try:
                     doc = Document()
-                    doc.add_heading('АНАЛИТИЧЕСКАЯ ЗАПИСКА', level=1)
+                    
+                    # Настройка стилей документа
+                    style = doc.styles['Normal']
+                    style.font.name = 'Times New Roman'
+                    style.font.size = Pt(12)
+                    
+                    # Заголовок
+                    heading = doc.add_heading('АНАЛИТИЧЕСКАЯ ЗАПИСКА', level=1)
+                    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
                     for line in ai_report.split('\n'):
                         clean_line = line.strip()
                         if not clean_line: continue
                         
-                        if '[ГРАФИК_РАСПРЕДЕЛЕНИЯ]' in clean_line:
+                        if '[ТАБЛИЦА_ОБОРУДОВАНИЯ]' in clean_line:
+                            # Вставка настоящей таблицы в Word
+                            table = doc.add_table(rows=1, cols=4)
+                            table.style = 'Table Grid'
+                            hdr_cells = table.rows[0].cells
+                            hdr_cells[0].text = 'Тип оборудования'
+                            hdr_cells[1].text = 'Количество (шт.)'
+                            hdr_cells[2].text = 'Охват (чел.)'
+                            hdr_cells[3].text = 'Бюджет (у.е.)'
+                            
+                            for _, row in summary_table.iterrows():
+                                row_cells = table.add_row().cells
+                                row_cells[0].text = str(row['Система_и_Канал'])
+                                row_cells[1].text = str(row['Количество'])
+                                row_cells[2].text = str(row['Общий_охват'])
+                                row_cells[3].text = str(row['Общая_стоимость'])
+                            doc.add_paragraph() # Отступ после таблицы
+                            
+                        elif '[ГРАФИК_РАСПРЕДЕЛЕНИЯ]' in clean_line:
                             doc.add_picture(img1_stream, width=Inches(6.0))
+                            
                         elif '[ГРАФИК_ОХВАТА]' in clean_line:
                             doc.add_picture(img2_stream, width=Inches(6.0))
-                        elif clean_line.startswith('### '):
-                            doc.add_heading(clean_line.replace('### ', ''), level=2)
-                        elif clean_line.startswith('**') and clean_line.endswith('**'):
-                            p = doc.add_paragraph()
-                            p.add_run(clean_line.replace('**', '')).bold = True
+                            
                         else:
-                            doc.add_paragraph(clean_line)
+                            p = doc.add_paragraph(clean_line)
+                            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
                     bio = BytesIO()
                     doc.save(bio)
 
                     st.download_button(
-                        label="Скачать официальный отчет (DOCX с графиками)",
+                        label="Скачать официальный отчет (DOCX с таблицей и графиками)",
                         data=bio.getvalue(),
                         file_name="Analytic_Report_Official.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
