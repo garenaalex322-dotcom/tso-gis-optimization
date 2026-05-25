@@ -46,7 +46,7 @@ if 'catalog' not in st.session_state:
 # ==========================================
 # ФУНКЦИЯ ИИ-АНАЛИТИКИ
 # ==========================================
-def generate_ai_insights(total_cost, total_coverage, total_population):
+def generate_ai_insights(total_cost, total_coverage, total_population, summary_df):
     api_key = st.secrets.get("OPENROUTER_API_KEY", os.environ.get("OPENROUTER_API_KEY"))
     if not api_key:
         return "Ошибка: API-ключ OpenRouter не найден. Убедитесь, что вы добавили его в конфигурацию среды."
@@ -54,22 +54,25 @@ def generate_ai_insights(total_cost, total_coverage, total_population):
     try:
         client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
         coverage_percent = (total_coverage / total_population * 100) if total_population > 0 else 0
+        data_context = summary_df[['Система_и_Канал', 'Количество', 'Общая_стоимость', 'Общий_охват']].to_string(index=False)
 
         prompt = f"""
         Вы — Главный системный аналитик и руководитель проектного офиса по модернизации систем гражданской обороны (РАСЦО).
 
-        ВВОДНЫЕ ДАННЫЕ ПРОЕКТА:
+        ВВОДНЫЕ ДАННЫЕ ПРОЕКТА (ОБЯЗАТЕЛЬНО ИСПОЛЬЗУЙТЕ ЭТИ ЦИФРЫ В ТЕКСТЕ):
         - Итоговый бюджет распределения: {total_cost:,.0f} у.е.
         - Расчетный охват населения: {total_coverage:,.0f} чел. ({coverage_percent:.1f}% от всей зоны риска).
+        - Детализация по оборудованию:\n{data_context}
 
         ЗАДАЧА:
         Сформируйте официальную аналитическую записку.
-        КРИТИЧЕСКОЕ ТРЕБОВАНИЕ: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown-разметку (никаких звездочек **, решеток ###, жирного шрифта или курсива). Используйте строго обычный текст, нумерацию (1., 2.) и абзацы.
+        КРИТИЧЕСКОЕ ТРЕБОВАНИЕ 1: КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать Markdown-разметку (никаких звездочек **, решеток ###, жирного шрифта). Используйте строго обычный текст.
+        КРИТИЧЕСКОЕ ТРЕБОВАНИЕ 2: Ваш отчет должен быть насыщен реальными цифрами из Вводных данных (упоминайте точные суммы бюджета, количество устройств, охват в людях и проценты), чтобы анализ выглядел глубоким и математически обоснованным.
 
         СТРУКТУРА:
         1. ВВЕДЕНИЕ: Обоснование применения симплекс-метода и расчета мультириска.
         [ТАБЛИЦА_ОБОРУДОВАНИЯ] (напишите этот тег ровно в этом месте)
-        2. АНАЛИЗ ЭФФЕКТИВНОСТИ: Научное объяснение выбора каналов связи с точки зрения рентабельности.
+        2. АНАЛИЗ ЭФФЕКТИВНОСТИ: Научное объяснение выбора каналов связи с точки зрения рентабельности. (Обязательно приведите цифры стоимости и охвата конкретных ТСО из таблицы).
         [ГРАФИК_РАСПРЕДЕЛЕНИЯ] (напишите этот тег ровно в этом месте)
         [ГРАФИК_ОХВАТА] (напишите этот тег ровно в этом месте)
         3. РЕКОМЕНДАЦИИ ПО ИНТЕГРАЦИИ: 3-4 конкретных шага по внедрению и эксплуатации системы.
@@ -78,7 +81,7 @@ def generate_ai_insights(total_cost, total_coverage, total_population):
         response = client.chat.completions.create(
             model="openai/gpt-4o",
             messages=[
-                {"role": "system", "content": "Вы строгий и профессиональный государственный аналитик. Не используете эмоции и спецсимволы в тексте."},
+                {"role": "system", "content": "Вы строгий и профессиональный государственный аналитик. Не используете эмоции и спецсимволы в тексте. Оперируете только сухими цифрами и фактами."},
                 {"role": "user", "content": prompt}
             ],
             extra_headers={
@@ -342,6 +345,9 @@ if data_result is not None:
         st.session_state.catalog = [dict(item) for item in DEFAULT_CATALOG]
         st.rerun()
 
+    # ===== ОСНОВНАЯ ОБЛАСТЬ ЭКРАНА =====
+    st.subheader("Технологические ограничения структуры каналов связи")
+    st.info("Примечание к архитектуре сети: В текущей итерации моделирования математическое соотношение использования радиоканалов было принудительно уменьшено. Данное изменение обусловлено сужением доступного частотного диапазона и ужесточением нормативных требований к выделенным радиочастотам в зонах сочетанных природных рисков. Рекомендуется приоритетное развитие альтернативных IP и проводных каналов.")
 
     st.subheader("Справочник оборудования")
     df_display_catalog = pd.DataFrame(st.session_state.catalog)
@@ -419,8 +425,13 @@ if data_result is not None:
                 total_cov = df_res['Охват'].sum()
                 total_pop = data_result['Население'].sum()
 
-                # Генерация текста отчета без Markdown
-                ai_report = generate_ai_insights(total_cost, total_cov, total_pop)
+                # Генерация текста отчета
+                ai_report = generate_ai_insights(total_cost, total_cov, total_pop, summary_table)
+
+                # Нормализация тегов с защитой от ошибок ИИ
+                ai_report_clean = ai_report.replace('[ТАБЛИЦА_ОБОРУДОВАНИЯ]', 'ТАБЛИЦА_ОБОРУДОВАНИЯ').replace('ТАБЛИЦА_ОБОРУДОВАНИЯ', '[ТАБЛИЦА_ОБОРУДОВАНИЯ]')
+                ai_report_clean = ai_report_clean.replace('[ГРАФИК_РАСПРЕДЕЛЕНИЯ]', 'ГРАФИК_РАСПРЕДЕЛЕНИЯ').replace('ГРАФИК_РАСПРЕДЕЛЕНИЯ', '[ГРАФИК_РАСПРЕДЕЛЕНИЯ]')
+                ai_report_clean = ai_report_clean.replace('[ГРАФИК_ОХВАТА]', 'ГРАФИК_ОХВАТА').replace('ГРАФИК_ОХВАТА', '[ГРАФИК_ОХВАТА]')
 
                 # Генерация графиков в память
                 fig1, ax1 = plt.subplots(figsize=(7, 4))
@@ -447,48 +458,43 @@ if data_result is not None:
 
                 st.success("Аналитическая записка сформирована.")
                 
-                # РЕНДЕРИНГ В ИНТЕРФЕЙСЕ (с заменой тегов на реальные таблицы и графики)
+                # РЕНДЕРИНГ В ИНТЕРФЕЙСЕ
                 with st.container(border=True):
-                    parts = ai_report.split('[ТАБЛИЦА_ОБОРУДОВАНИЯ]')
-                    st.text(parts[0].strip())
+                    parts = ai_report_clean.split('[ТАБЛИЦА_ОБОРУДОВАНИЯ]')
+                    st.write(parts[0].strip())  # Заменено st.text на st.write для красивого переноса слов
                     
                     if len(parts) > 1:
-                        # Вставляем красивую таблицу в интерфейс
                         display_df = summary_table[['Система_и_Канал', 'Количество', 'Общий_охват', 'Общая_стоимость']]
                         display_df.columns = ['Тип оборудования', 'Закупка (шт.)', 'Охват (чел.)', 'Бюджет (у.е.)']
                         st.table(display_df)
                         
                         parts2 = parts[1].split('[ГРАФИК_РАСПРЕДЕЛЕНИЯ]')
-                        st.text(parts2[0].strip())
+                        st.write(parts2[0].strip())
                         
                         if len(parts2) > 1:
                             st.image(img1_stream)
                             parts3 = parts2[1].split('[ГРАФИК_ОХВАТА]')
-                            st.text(parts3[0].strip())
+                            st.write(parts3[0].strip())
                             
                             if len(parts3) > 1:
                                 st.image(img2_stream)
-                                st.text(parts3[1].strip())
+                                st.write(parts3[1].strip())
 
                 # СОЗДАНИЕ ОФИЦИАЛЬНОГО DOCX ФАЙЛА
                 try:
                     doc = Document()
-                    
-                    # Настройка стилей документа
                     style = doc.styles['Normal']
                     style.font.name = 'Times New Roman'
                     style.font.size = Pt(12)
                     
-                    # Заголовок
                     heading = doc.add_heading('АНАЛИТИЧЕСКАЯ ЗАПИСКА', level=1)
                     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
-                    for line in ai_report.split('\n'):
+                    for line in ai_report_clean.split('\n'):
                         clean_line = line.strip()
                         if not clean_line: continue
                         
                         if '[ТАБЛИЦА_ОБОРУДОВАНИЯ]' in clean_line:
-                            # Вставка настоящей таблицы в Word
                             table = doc.add_table(rows=1, cols=4)
                             table.style = 'Table Grid'
                             hdr_cells = table.rows[0].cells
@@ -503,7 +509,7 @@ if data_result is not None:
                                 row_cells[1].text = str(row['Количество'])
                                 row_cells[2].text = str(row['Общий_охват'])
                                 row_cells[3].text = str(row['Общая_стоимость'])
-                            doc.add_paragraph() # Отступ после таблицы
+                            doc.add_paragraph()
                             
                         elif '[ГРАФИК_РАСПРЕДЕЛЕНИЯ]' in clean_line:
                             doc.add_picture(img1_stream, width=Inches(6.0))
